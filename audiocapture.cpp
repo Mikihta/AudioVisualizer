@@ -150,15 +150,91 @@ void AudioCapture::run()
     CoUninitialize();
 }
 
+
 QVector<float> AudioCapture::processAudioData(const QVector<float>& rawData)
 {
-    const int SPECTRUM_SIZE = 64;
     QVector<float> spectrum(SPECTRUM_SIZE, 0.0f);
 
-    // Simple FFT-like processing
-    for (int i = 0; i < SPECTRUM_SIZE && i < rawData.size(); i++) {
-        spectrum[i] = std::abs(rawData[i]);
+    // 准备FFT数据
+    std::vector<std::complex<float>> fftData(FFT_SIZE);
+
+    // 填充FFT数据并应用汉宁窗
+    for (int i = 0; i < FFT_SIZE && i < rawData.size(); ++i) {
+        float hanningWindow = 0.5f * (1.0f - cos(2.0f * M_PI * i / (FFT_SIZE - 1)));
+        fftData[i] = std::complex<float>(rawData[i] * hanningWindow, 0.0f);
+    }
+
+    // 执行FFT
+    performFFT(fftData);
+
+    // 频率分段设置（每个频段的起始和结束频率）
+    const int frequencyBands[SPECTRUM_SIZE + 1] = {
+        20, 25, 32, 40, 50, 63, 80, 100, 125, 160,
+        200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600,
+        2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000,
+        20000 // 最后一个值作为最高频率界限
+    };
+
+    // 计算每个频段的能量
+    for (int i = 0; i < SPECTRUM_SIZE; ++i) {
+        int startFreq = frequencyBands[i];
+        int endFreq = frequencyBands[i + 1];
+
+        float magnitude = getFrequencyMagnitude(fftData, startFreq, endFreq);
+
+        // 对数映射以增强低频显示效果
+        magnitude = std::log10(1 + magnitude) * 0.5f;
+
+        // 限制在0-1范围内
+        spectrum[i] = std::min(1.0f, std::max(0.0f, magnitude));
     }
 
     return spectrum;
+}
+
+void AudioCapture::performFFT(std::vector<std::complex<float>>& data)
+{
+    const int n = data.size();
+    if (n <= 1) return;
+
+    // 分割数组
+    std::vector<std::complex<float>> even(n/2);
+    std::vector<std::complex<float>> odd(n/2);
+    for (int i = 0; i < n/2; i++) {
+        even[i] = data[2*i];
+        odd[i] = data[2*i+1];
+    }
+
+    // 递归计算
+    performFFT(even);
+    performFFT(odd);
+
+    // 合并结果
+    for (int k = 0; k < n/2; k++) {
+        float angle = -2 * M_PI * k / n;
+        std::complex<float> t = std::polar(1.0f, angle) * odd[k];
+        data[k] = even[k] + t;
+        data[k + n/2] = even[k] - t;
+    }
+}
+
+float AudioCapture::getFrequencyMagnitude(const std::vector<std::complex<float>>& fftData,
+                                          int startFreq, int endFreq)
+{
+    float totalMagnitude = 0.0f;
+    int startBin = startFreq * FFT_SIZE / SAMPLE_RATE;
+    int endBin = endFreq * FFT_SIZE / SAMPLE_RATE;
+
+    // 确保bin索引在有效范围内
+    startBin = std::max(0, std::min(startBin, (int)fftData.size()/2));
+    endBin = std::max(0, std::min(endBin, (int)fftData.size()/2));
+
+    int binCount = 0;
+    for (int bin = startBin; bin < endBin; ++bin) {
+        float magnitude = std::abs(fftData[bin]);
+        totalMagnitude += magnitude;
+        ++binCount;
+    }
+
+    return binCount > 0 ? totalMagnitude / binCount : 0.0f;
 }

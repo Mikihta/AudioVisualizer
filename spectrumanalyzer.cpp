@@ -21,6 +21,8 @@ QColor SpectrumAnalyzer::getColor(int index, int total)
     return QColor::fromHsv(hue, 255, 255);
 }
 
+// spectrumanalyzer.cpp
+
 void SpectrumAnalyzer::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
@@ -31,11 +33,31 @@ void SpectrumAnalyzer::paintEvent(QPaintEvent *event)
     const int barWidth = width() / currentSpectrum.size();
     const int maxHeight = height() - 10;
 
+    // 添加平滑效果
+    static QVector<float> lastSpectrum;
+    if (lastSpectrum.size() != currentSpectrum.size()) {
+        lastSpectrum = currentSpectrum;
+    }
+
     for (int i = 0; i < currentSpectrum.size(); ++i) {
-        float value = currentSpectrum[i];
+        // 平滑过渡
+        lastSpectrum[i] = lastSpectrum[i] * 0.7f + currentSpectrum[i] * 0.3f;
+        float value = lastSpectrum[i];
+
         int barHeight = int(value * maxHeight);
 
-        QColor color = getColor(i, currentSpectrum.size());
+        // 使用HSL颜色空间，基于频率生成颜色
+        QColor color;
+        if (i < currentSpectrum.size() / 3) {  // 低频 - 红色到黄色
+            color = QColor::fromHsl(i * 60 / (currentSpectrum.size() / 3), 255, 128);
+        } else if (i < currentSpectrum.size() * 2 / 3) {  // 中频 - 黄色到绿色
+            int pos = i - currentSpectrum.size() / 3;
+            color = QColor::fromHsl(60 + pos * 60 / (currentSpectrum.size() / 3), 255, 128);
+        } else {  // 高频 - 绿色到蓝色
+            int pos = i - currentSpectrum.size() * 2 / 3;
+            color = QColor::fromHsl(120 + pos * 120 / (currentSpectrum.size() / 3), 255, 128);
+        }
+
         QLinearGradient gradient(
             QPointF(0, height() - barHeight),
             QPointF(0, height()));
