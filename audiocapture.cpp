@@ -167,30 +167,34 @@ QVector<float> AudioCapture::processAudioData(const QVector<float>& rawData)
     // 执行FFT
     performFFT(fftData);
 
-    // 频率分段设置（每个频段的起始和结束频率）
-    const int frequencyBands[SPECTRUM_SIZE + 1] = {
-        20, 25, 32, 40, 50, 63, 80, 100, 125, 160,
-        200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600,
-        2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000,
-        20000 // 最后一个值作为最高频率界限
-    };
+    // 使用更均匀的频率分布
+    const float minFreq = 20.0f;
+    const float maxFreq = 20000.0f;
 
-    // 计算每个频段的能量
     for (int i = 0; i < SPECTRUM_SIZE; ++i) {
-        int startFreq = frequencyBands[i];
-        int endFreq = frequencyBands[i + 1];
+        // 使用指数分布来计算频率范围
+        float startFreq = minFreq * std::pow(maxFreq/minFreq, (float)i / SPECTRUM_SIZE);
+        float endFreq = minFreq * std::pow(maxFreq/minFreq, (float)(i + 1) / SPECTRUM_SIZE);
 
         float magnitude = getFrequencyMagnitude(fftData, startFreq, endFreq);
 
-        // 对数映射以增强低频显示效果
-        magnitude = std::log10(1 + magnitude) * 0.5f;
+        // 应用对数映射和归一化
+        magnitude = std::log10(1 + magnitude * 100) / 2.0f;
 
-        // 限制在0-1范围内
-        spectrum[i] = std::min(1.0f, std::max(0.0f, magnitude));
+        // 添加一个小的基础值，确保始终有微小的显示
+        spectrum[i] = std::min(1.0f, std::max(0.1f, magnitude));
     }
+
+    // 应用平滑处理
+    static QVector<float> lastSpectrum = spectrum;
+    for (int i = 0; i < SPECTRUM_SIZE; ++i) {
+        spectrum[i] = lastSpectrum[i] * 0.7f + spectrum[i] * 0.3f;
+    }
+    lastSpectrum = spectrum;
 
     return spectrum;
 }
+
 
 void AudioCapture::performFFT(std::vector<std::complex<float>>& data)
 {
@@ -219,22 +223,29 @@ void AudioCapture::performFFT(std::vector<std::complex<float>>& data)
 }
 
 float AudioCapture::getFrequencyMagnitude(const std::vector<std::complex<float>>& fftData,
-                                          int startFreq, int endFreq)
+                                          float startFreq, float endFreq)
 {
     float totalMagnitude = 0.0f;
-    int startBin = startFreq * FFT_SIZE / SAMPLE_RATE;
-    int endBin = endFreq * FFT_SIZE / SAMPLE_RATE;
 
-    // 确保bin索引在有效范围内
-    startBin = std::max(0, std::min(startBin, (int)fftData.size()/2));
-    endBin = std::max(0, std::min(endBin, (int)fftData.size()/2));
+    // 将频率转换为FFT bin索引
+    int startBin = std::max(1, (int)(startFreq * FFT_SIZE / SAMPLE_RATE));
+    int endBin = std::min((int)(endFreq * FFT_SIZE / SAMPLE_RATE), FFT_SIZE/2);
 
-    int binCount = 0;
+    // 确保至少有一个bin
+    endBin = std::max(startBin + 1, endBin);
+
+    float binCount = 0;
     for (int bin = startBin; bin < endBin; ++bin) {
+        // 计算bin的幅度，并应用频率权重
         float magnitude = std::abs(fftData[bin]);
-        totalMagnitude += magnitude;
-        ++binCount;
+        float frequency = bin * SAMPLE_RATE / FFT_SIZE;
+
+        // 对高频进行轻微提升
+        float frequencyWeight = std::pow(frequency / startFreq, 0.2f);
+        totalMagnitude += magnitude * frequencyWeight;
+        binCount += 1.0f;
     }
 
     return binCount > 0 ? totalMagnitude / binCount : 0.0f;
 }
+

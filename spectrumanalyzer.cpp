@@ -21,55 +21,60 @@ QColor SpectrumAnalyzer::getColor(int index, int total)
     return QColor::fromHsv(hue, 255, 255);
 }
 
-// spectrumanalyzer.cpp
-
 void SpectrumAnalyzer::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
 
     QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
     painter.fillRect(rect(), Qt::black);
+
+    if (currentSpectrum.isEmpty())
+        return;
 
     const int barWidth = width() / currentSpectrum.size();
     const int maxHeight = height() - 10;
 
-    // 添加平滑效果
-    static QVector<float> lastSpectrum;
-    if (lastSpectrum.size() != currentSpectrum.size()) {
-        lastSpectrum = currentSpectrum;
-    }
+    // 存储上一帧的数据用于平滑处理
+    static QVector<float> lastHeights(currentSpectrum.size(), 0);
 
     for (int i = 0; i < currentSpectrum.size(); ++i) {
         // 平滑过渡
-        lastSpectrum[i] = lastSpectrum[i] * 0.7f + currentSpectrum[i] * 0.3f;
-        float value = lastSpectrum[i];
+        float targetHeight = currentSpectrum[i] * maxHeight;
+        float& lastHeight = lastHeights[i];
+        lastHeight = lastHeight * 0.8f + targetHeight * 0.2f;
 
-        int barHeight = int(value * maxHeight);
+        int barHeight = static_cast<int>(lastHeight);
 
-        // 使用HSL颜色空间，基于频率生成颜色
-        QColor color;
-        if (i < currentSpectrum.size() / 3) {  // 低频 - 红色到黄色
-            color = QColor::fromHsl(i * 60 / (currentSpectrum.size() / 3), 255, 128);
-        } else if (i < currentSpectrum.size() * 2 / 3) {  // 中频 - 黄色到绿色
-            int pos = i - currentSpectrum.size() / 3;
-            color = QColor::fromHsl(60 + pos * 60 / (currentSpectrum.size() / 3), 255, 128);
-        } else {  // 高频 - 绿色到蓝色
-            int pos = i - currentSpectrum.size() * 2 / 3;
-            color = QColor::fromHsl(120 + pos * 120 / (currentSpectrum.size() / 3), 255, 128);
-        }
+        // 确保最小高度
+        barHeight = std::max(2, barHeight);
 
+        // 计算颜色
+        float hue = i * 360.0f / currentSpectrum.size();
+        QColor baseColor = QColor::fromHsv(hue, 255, 255);
+
+        // 创建渐变
         QLinearGradient gradient(
             QPointF(0, height() - barHeight),
             QPointF(0, height()));
 
-        gradient.setColorAt(0, color);
-        gradient.setColorAt(1, color.darker());
+        gradient.setColorAt(0, baseColor);
+        gradient.setColorAt(1, baseColor.darker(200));
 
+        // 绘制主条
         painter.fillRect(
-            i * barWidth,
+            i * barWidth + 1,  // 添加1像素间距
             height() - barHeight,
-            barWidth - 1,
+            barWidth - 2,      // 减少2像素宽度形成间距
             barHeight,
             gradient);
+
+        // 绘制顶部高光
+        painter.fillRect(
+            i * barWidth + 1,
+            height() - barHeight,
+            barWidth - 2,
+            2,
+            baseColor.lighter(150));
     }
 }
